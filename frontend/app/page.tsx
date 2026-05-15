@@ -16,7 +16,7 @@ export default function HomePage() {
 
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center px-4">
-      <motionBackgroundGlow />
+      <MotionBackgroundGlow />
       <div className="relative z-10 w-full max-w-xl text-center">
         <p className="mb-3 text-sm font-medium uppercase tracking-widest text-emerald-400/90">
           Claude × FMP
@@ -53,7 +53,7 @@ export default function HomePage() {
   );
 }
 
-function motionBackgroundGlow() {
+function MotionBackgroundGlow() {
   return (
     <div
       className="pointer-events-none fixed inset-0 overflow-hidden"
