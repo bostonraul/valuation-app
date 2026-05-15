@@ -1,4 +1,5 @@
 import json
+import logging
 import os
 from datetime import datetime
 from io import BytesIO
@@ -15,13 +16,20 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from supabase import Client, create_client
 
+logger = logging.getLogger("valuation-api")
+
 load_dotenv(Path(__file__).resolve().parent.parent / ".env")
 
-ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
-FMP_API_KEY = os.getenv("FMP_API_KEY", "")
-SUPABASE_URL = os.getenv("SUPABASE_URL", "")
-SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY", "")
-FRONTEND_URL = os.getenv("FRONTEND_URL", "http://localhost:3000")
+
+def _env(name: str, default: str = "") -> str:
+    return os.getenv(name, default).strip()
+
+
+ANTHROPIC_API_KEY = _env("ANTHROPIC_API_KEY")
+FMP_API_KEY = _env("FMP_API_KEY")
+SUPABASE_URL = _env("SUPABASE_URL")
+SUPABASE_ANON_KEY = _env("SUPABASE_ANON_KEY")
+FRONTEND_URL = _env("FRONTEND_URL", "http://localhost:3000")
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILL_PATH = ROOT / "skills" / "dcf-model" / "SKILL.md"
@@ -38,9 +46,26 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-supabase: Client | None = None
-if SUPABASE_URL and SUPABASE_ANON_KEY:
-    supabase = create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+def _init_supabase() -> Client | None:
+    """Connect to Supabase if credentials are valid; never crash app startup."""
+    placeholders = {"", "your-anon-key", "your-project.supabase.co"}
+    if SUPABASE_URL in placeholders or SUPABASE_ANON_KEY in placeholders:
+        logger.warning("Supabase not configured — valuations will not be cached")
+        return None
+    if not SUPABASE_URL.startswith("https://") or "supabase.co" not in SUPABASE_URL:
+        logger.warning("SUPABASE_URL looks invalid — skipping Supabase")
+        return None
+    if len(SUPABASE_ANON_KEY) < 20:
+        logger.warning("SUPABASE_ANON_KEY looks invalid — skipping Supabase")
+        return None
+    try:
+        return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
+    except Exception as exc:
+        logger.warning("Supabase client failed: %s — continuing without cache", exc)
+        return None
+
+
+supabase: Client | None = _init_supabase()
 
 anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY) if ANTHROPIC_API_KEY else None
 
