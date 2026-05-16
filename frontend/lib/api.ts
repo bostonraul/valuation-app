@@ -30,7 +30,8 @@ export async function exportValuationExcel(
     `${getApiBase()}/api/export/${encodeURIComponent(ticker.toUpperCase())}`,
     {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      mode: "cors",
+      headers: { "Content-Type": "application/json", Accept: "*/*" },
       body: JSON.stringify(data),
     }
   );

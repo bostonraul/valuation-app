@@ -9,11 +9,12 @@ from typing import Any
 import httpx
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from fastapi import FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
-from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.styles import Font, PatternFill
+from openpyxl.utils import get_column_letter
 from supabase import Client, create_client
 
 logger = logging.getLogger("valuation-api")
@@ -36,14 +37,31 @@ SKILL_PATH = ROOT / "skills" / "dcf-model" / "SKILL.md"
 AGENT_PATH = ROOT / "agents" / "valuation-agent.md"
 FMP_BASE = "https://financialmodelingprep.com/api/v3"
 
+def _cors_origins() -> list[str]:
+    origins = [FRONTEND_URL, "http://localhost:3000"]
+    extra = _env("CORS_ALLOW_ORIGINS")
+    if extra:
+        origins.extend(o for o in extra.split(",") if o.strip())
+    # De-dupe while preserving order
+    seen: set[str] = set()
+    unique: list[str] = []
+    for o in origins:
+        if o and o not in seen:
+            seen.add(o)
+            unique.append(o)
+    return unique
+
+
 app = FastAPI(title="Valuation API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[FRONTEND_URL, "http://localhost:3000", "https://*.vercel.app"],
-    allow_origin_regex=r"https://.*\.vercel\.app",
-    allow_credentials=True,
-    allow_methods=["*"],
+    allow_origins=_cors_origins(),
+    # Matches production + preview Vercel URLs (e.g. valuation-app-phi.vercel.app)
+    allow_origin_regex=r"https://([a-z0-9-]+\.)*vercel\.app$",
+    allow_credentials=False,
+    allow_methods=["GET", "POST", "OPTIONS"],
     allow_headers=["*"],
+    expose_headers=["Content-Disposition"],
 )
 
 def _init_supabase() -> Client | None:
@@ -408,7 +426,10 @@ async def get_valuation(ticker: str, refresh: bool = False):
 
 
 @app.post("/api/export/{ticker}")
-async def export_valuation(ticker: str, body: dict[str, Any]):
+async def export_valuation(
+    ticker: str,
+    body: dict[str, Any] = Body(default_factory=dict),
+):
     ticker = ticker.upper()
     data = body or {}
     if not data.get("scenarios"):
@@ -466,12 +487,13 @@ async def export_valuation(ticker: str, body: dict[str, Any]):
             for i, val in enumerate(values, start=2):
                 ws.cell(row, i, val)
 
-    for col in ws.columns:
+    for col_idx in range(1, (ws.max_column or 1) + 1):
+        letter = get_column_letter(col_idx)
         max_len = 0
-        letter = col[0].column_letter
-        for cell in col:
-            if cell.value is not None:
-                max_len = max(max_len, len(str(cell.value)))
+        for row_idx in range(1, (ws.max_row or 1) + 1):
+            value = ws.cell(row_idx, col_idx).value
+            if value is not None:
+                max_len = max(max_len, len(str(value)))
         ws.column_dimensions[letter].width = min(max_len + 2, 24)
 
     buffer = BytesIO()
