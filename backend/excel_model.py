@@ -6,8 +6,12 @@ Inputs seeded from valuation JSON; calculation cells use Excel formulas.
 
 from __future__ import annotations
 
+import logging
+import math
 from io import BytesIO
 from typing import Any
+
+logger = logging.getLogger("valuation-api")
 
 from openpyxl import Workbook
 from openpyxl.styles import Font, PatternFill
@@ -161,20 +165,21 @@ def _apply_formula_cache(ws, cache: dict[tuple[int, int], float]) -> None:
     from openpyxl.xml.functions import SubElement
 
     for (row, col), result in cache.items():
-        cell = ws.cell(row=row, column=col)
-        formula = cell.value
-        if not formula or not isinstance(formula, str) or not formula.startswith("="):
-            continue
-        el = cell._element
-        f_el = el.find(f"{{{SHEET_MAIN_NS}}}f")
-        if f_el is None:
-            f_el = SubElement(el, f"{{{SHEET_MAIN_NS}}}f")
-            f_el.text = formula[1:]
-        v_el = el.find(f"{{{SHEET_MAIN_NS}}}v")
-        if v_el is None:
-            v_el = SubElement(el, f"{{{SHEET_MAIN_NS}}}v")
-        v_el.text = str(result)
-        cell.data_type = "f"
+        try:
+            if not math.isfinite(result):
+                result = 0.0
+            cell = ws.cell(row=row, column=col)
+            formula = cell.value
+            if not formula or not isinstance(formula, str) or not formula.startswith("="):
+                continue
+            el = cell._element
+            v_el = el.find(f"{{{SHEET_MAIN_NS}}}v")
+            if v_el is None:
+                v_el = SubElement(el, f"{{{SHEET_MAIN_NS}}}v")
+            v_el.text = str(float(result))
+            cell.data_type = "f"
+        except Exception as exc:
+            logger.debug("Skip cache for %s!%s%s: %s", ws.title, get_column_letter(col), row, exc)
 
 
 def build_formula_linked_workbook(data: dict[str, Any], ticker: str) -> BytesIO:
@@ -546,15 +551,24 @@ def build_formula_linked_workbook(data: dict[str, Any], ticker: str) -> BytesIO:
         exit_mult=em_base,
         terminal_method=2,
     )
-    _apply_formula_cache(ws_dcf, dcf_cache)
+    try:
+        _apply_formula_cache(ws_dcf, dcf_cache)
+    except Exception as exc:
+        logger.warning("DCF formula cache skipped: %s", exc)
 
-    wb.calculation.calcMode = "auto"
-    wb.calculation.fullCalcOnLoad = True
-    wb.calculation.forceFullCalc = True
+    try:
+        wb.calculation.calcMode = "auto"
+        wb.calculation.fullCalcOnLoad = True
+    except Exception as exc:
+        logger.warning("Workbook calc properties skipped: %s", exc)
 
     _autosize_columns(wb)
     buf = BytesIO()
-    wb.save(buf)
+    try:
+        wb.save(buf)
+    except Exception as exc:
+        logger.exception("Excel save failed")
+        raise RuntimeError(f"Could not build Excel file: {exc}") from exc
     buf.seek(0)
     return buf
 

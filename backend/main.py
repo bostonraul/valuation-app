@@ -8,9 +8,9 @@ from typing import Any
 import httpx
 from anthropic import Anthropic
 from dotenv import load_dotenv
-from fastapi import Body, FastAPI, HTTPException
+from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from supabase import Client, create_client
 
 from excel_model import build_formula_linked_workbook
@@ -57,10 +57,22 @@ app.add_middleware(
     # Matches production + preview Vercel URLs (e.g. valuation-app-phi.vercel.app)
     allow_origin_regex=r"https://([a-z0-9-]+\.)*vercel\.app$",
     allow_credentials=False,
-    allow_methods=["GET", "POST", "OPTIONS"],
+    allow_methods=["*"],
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException) -> JSONResponse:
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+    logger.exception("Unhandled error on %s %s", request.method, request.url.path)
+    return JSONResponse(status_code=500, content={"detail": str(exc)})
+
 
 def _init_supabase() -> Client | None:
     """Connect to Supabase if credentials are valid; never crash app startup."""
@@ -429,14 +441,23 @@ async def export_valuation(
     body: dict[str, Any] = Body(default_factory=dict),
 ):
     ticker = ticker.upper()
-    data = body or {}
-    if not data.get("scenarios"):
-        data = await run_valuation_agent(ticker)
+    data = body if isinstance(body, dict) else {}
+    try:
+        if not data.get("scenarios"):
+            data = await run_valuation_agent(ticker)
 
-    buffer = build_formula_linked_workbook(data, ticker)
-    filename = f"{ticker}_valuation.xlsx"
-    return StreamingResponse(
-        buffer,
-        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
-    )
+        buffer = build_formula_linked_workbook(data, ticker)
+        filename = f"{ticker}_valuation.xlsx"
+        return StreamingResponse(
+            buffer,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f'attachment; filename="{filename}"',
+                "Access-Control-Expose-Headers": "Content-Disposition",
+            },
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Export failed for %s", ticker)
+        raise HTTPException(status_code=500, detail=f"Export failed: {exc}") from exc

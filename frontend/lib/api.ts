@@ -36,7 +36,15 @@ export async function exportValuationExcel(
     }
   );
   if (!res.ok) {
-    throw new Error(`Export failed (${res.status})`);
+    let detail = `Export failed (${res.status})`;
+    try {
+      const err = await res.json();
+      if (err?.detail) detail = String(err.detail);
+    } catch {
+      const text = await res.text();
+      if (text) detail = text.slice(0, 200);
+    }
+    throw new Error(detail);
   }
   return res.blob();
 }
