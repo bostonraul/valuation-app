@@ -66,6 +66,117 @@ def _net_debt_millions(data: dict[str, Any]) -> float:
     return 50_000.0
 
 
+def _pick(bear: float, base: float, bull: float, scenario: int = 2) -> float:
+    return (bear, base, bull)[max(0, min(scenario - 1, 2))]
+
+
+def _compute_dcf_cache(
+    *,
+    ltm: float,
+    rev_g: float,
+    tg: float,
+    ebitda_m: float,
+    nwc_pct_rev: float,
+    capex_pct: float,
+    da_pct: float,
+    tax: float,
+    wacc: float,
+    nd: float,
+    shares: float,
+    exit_mult: float,
+    terminal_method: int,
+) -> dict[tuple[int, int], float]:
+    """Mirror DCF formulas in Python so Excel can show cached results on open."""
+    revs: list[float] = []
+    ebitdas: list[float] = []
+    das: list[float] = []
+    ebits: list[float] = []
+    taxes: list[float] = []
+    nopats: list[float] = []
+    capexs: list[float] = []
+    dnwc: list[float] = []
+    fcfs: list[float] = []
+
+    prev_rev = ltm
+    for _ in range(5):
+        rev = prev_rev * (1 + rev_g)
+        revs.append(rev)
+        ebitda = rev * ebitda_m
+        da = rev * da_pct
+        ebit = ebitda - da
+        tax_amt = ebit * tax
+        nopat = ebit - tax_amt
+        capex = -rev * capex_pct
+        delta = -(rev - prev_rev) * nwc_pct_rev
+        prev_rev = rev
+        fcf = nopat + da + capex + delta
+        ebitdas.append(ebitda)
+        das.append(da)
+        ebits.append(ebit)
+        taxes.append(tax_amt)
+        nopats.append(nopat)
+        capexs.append(capex)
+        dnwc.append(delta)
+        fcfs.append(fcf)
+
+    last_fcf = fcfs[-1]
+    last_ebitda = ebitdas[-1]
+    tv_gordon = last_fcf * (1 + tg) / (wacc - tg) if wacc > tg else 0.0
+    tv_exit = last_ebitda * exit_mult
+    tv = tv_gordon if terminal_method == 1 else tv_exit
+
+    pv_fcf = sum(fcf / ((1 + wacc) ** (i + 1)) for i, fcf in enumerate(fcfs))
+    pv_tv = tv / ((1 + wacc) ** 5)
+    ev = pv_fcf + pv_tv
+    equity = ev - nd
+    price = equity / shares if shares else 0.0
+
+    cache: dict[tuple[int, int], float] = {}
+    for i in range(5):
+        col = 3 + i
+        cache[(5, col)] = revs[i]
+        cache[(7, col)] = ebitdas[i]
+        cache[(8, col)] = das[i]
+        cache[(9, col)] = ebits[i]
+        cache[(10, col)] = taxes[i]
+        cache[(11, col)] = nopats[i]
+        cache[(12, col)] = capexs[i]
+        cache[(13, col)] = dnwc[i]
+        cache[(14, col)] = fcfs[i]
+        cache[(20, col)] = fcfs[i] / ((1 + wacc) ** (i + 1))
+
+    cache[(16, 7)] = tv_gordon
+    cache[(17, 7)] = tv_exit
+    cache[(18, 7)] = tv
+    cache[(21, 7)] = pv_tv
+    cache[(23, 2)] = ev
+    cache[(24, 2)] = equity
+    cache[(25, 2)] = price
+    return cache
+
+
+def _apply_formula_cache(ws, cache: dict[tuple[int, int], float]) -> None:
+    """Attach cached numeric results to formula cells (Excel shows values before F9)."""
+    from openpyxl.xml.constants import SHEET_MAIN_NS
+    from openpyxl.xml.functions import SubElement
+
+    for (row, col), result in cache.items():
+        cell = ws.cell(row=row, column=col)
+        formula = cell.value
+        if not formula or not isinstance(formula, str) or not formula.startswith("="):
+            continue
+        el = cell._element
+        f_el = el.find(f"{{{SHEET_MAIN_NS}}}f")
+        if f_el is None:
+            f_el = SubElement(el, f"{{{SHEET_MAIN_NS}}}f")
+            f_el.text = formula[1:]
+        v_el = el.find(f"{{{SHEET_MAIN_NS}}}v")
+        if v_el is None:
+            v_el = SubElement(el, f"{{{SHEET_MAIN_NS}}}v")
+        v_el.text = str(result)
+        cell.data_type = "f"
+
+
 def build_formula_linked_workbook(data: dict[str, Any], ticker: str) -> BytesIO:
     wb = Workbook()
     # Remove default sheet after we create ordered sheets
@@ -208,6 +319,11 @@ def build_formula_linked_workbook(data: dict[str, Any], ticker: str) -> BytesIO:
     # ----- DCF -----
     ws_dcf["A1"] = "Discounted cash flow (formulas → Assumptions)"
     ws_dcf["A1"].font = Font(bold=True, size=14)
+    ws_dcf["A2"] = (
+        "Projections in columns C–G. If blank: click Enable Editing (yellow bar), then press F9. "
+        "Values are pre-cached; formulas remain editable."
+    )
+    ws_dcf["A2"].font = Font(italic=True, size=10, color="666666")
 
     ws_dcf["B3"] = "Year index"
     for i, y in enumerate(years[:5]):
@@ -263,12 +379,16 @@ def build_formula_linked_workbook(data: dict[str, Any], ticker: str) -> BytesIO:
         cl = get_column_letter(col)
         ws_dcf.cell(12, col, f"=-{cl}5*Assumptions!$E$10")
 
-    # ΔNWC from Working Capital sheet row 6
+    # ΔNWC on DCF (avoids circular ref with Working Capital sheet)
     ws_dcf["A13"] = "Δ Net working capital"
     for i in range(5):
         col = 3 + i
         cl = get_column_letter(col)
-        ws_dcf.cell(13, col, f"='Working Capital'!{cl}6")
+        if i == 0:
+            ws_dcf.cell(13, col, f"=-({cl}5-Assumptions!$B$28)*Assumptions!$E$9")
+        else:
+            pcl = get_column_letter(col - 1)
+            ws_dcf.cell(13, col, f"=-({cl}5-{pcl}5)*Assumptions!$E$9")
 
     ws_dcf["A14"] = "Unlevered FCF"
     for i in range(5):
@@ -322,15 +442,11 @@ def build_formula_linked_workbook(data: dict[str, Any], ticker: str) -> BytesIO:
         cl = get_column_letter(col)
         ws_wc.cell(5, col, f"=DCF!{cl}5*$B$3")
 
-    ws_wc["A6"] = "Δ NWC ($M, cash; linked to DCF)"
+    ws_wc["A6"] = "Δ NWC ($M, mirrors DCF row 13)"
     for i in range(5):
         col = 3 + i
         cl = get_column_letter(col)
-        if i == 0:
-            ws_wc.cell(6, col, f"=-{cl}5")
-        else:
-            pcl = get_column_letter(col - 1)
-            ws_wc.cell(6, col, f"=-({cl}5-{pcl}5)")
+        ws_wc.cell(6, col, f"=DCF!{cl}13")
 
     # ----- Debt -----
     ws_debt["A1"] = "Debt schedule (simplified bullet)"
@@ -399,6 +515,42 @@ def build_formula_linked_workbook(data: dict[str, Any], ticker: str) -> BytesIO:
     ws_sum.cell(row + 4, 2, '=IF(Assumptions!$B$32=1,"Gordon Growth","Exit EV/EBITDA")')
 
     _build_sensitivity_sheet(ws_sens, hdr_fill, hdr_font, input_fill)
+
+    ke = rf + beta * erp
+    kd_at = kd * (1 - tax)
+    wacc_val = we * ke + wd * kd_at
+    if _num(wacc.get("wacc")) > 0:
+        wacc_val = _num(wacc.get("wacc"))
+        if wacc_val > 1:
+            wacc_val /= 100.0
+
+    active_rev_g = _pick(rev_g_bear, rev_g_base, rev_g_bull, 2)
+    active_tg = _pick(tg_bear, tg_base, tg_bull, 2)
+    active_ebitda_m = _pick(0.28, ebitda_m, 0.36, 2)
+    active_nwc = _pick(0.02, 0.025, 0.03, 2)
+    active_capex = _pick(0.045, 0.05, 0.055, 2)
+    active_da = _pick(0.04, 0.05, 0.06, 2)
+
+    dcf_cache = _compute_dcf_cache(
+        ltm=ltm,
+        rev_g=active_rev_g,
+        tg=active_tg,
+        ebitda_m=active_ebitda_m,
+        nwc_pct_rev=active_nwc,
+        capex_pct=active_capex,
+        da_pct=active_da,
+        tax=tax,
+        wacc=wacc_val,
+        nd=nd,
+        shares=sh,
+        exit_mult=em_base,
+        terminal_method=2,
+    )
+    _apply_formula_cache(ws_dcf, dcf_cache)
+
+    wb.calculation.calcMode = "auto"
+    wb.calculation.fullCalcOnLoad = True
+    wb.calculation.forceFullCalc = True
 
     _autosize_columns(wb)
     buf = BytesIO()
