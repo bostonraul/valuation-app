@@ -2,7 +2,6 @@ import json
 import logging
 import os
 from datetime import datetime
-from io import BytesIO
 from pathlib import Path
 from typing import Any
 
@@ -12,10 +11,9 @@ from dotenv import load_dotenv
 from fastapi import Body, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
-from openpyxl import Workbook
-from openpyxl.styles import Font, PatternFill
-from openpyxl.utils import get_column_letter
 from supabase import Client, create_client
+
+from excel_model import build_formula_linked_workbook
 
 logger = logging.getLogger("valuation-api")
 
@@ -435,70 +433,7 @@ async def export_valuation(
     if not data.get("scenarios"):
         data = await run_valuation_agent(ticker)
 
-    wb = Workbook()
-    ws = wb.active
-    ws.title = "DCF Summary"
-
-    header_fill = PatternFill("solid", fgColor="1F2937")
-    header_font = Font(color="FFFFFF", bold=True)
-    accent_fill = PatternFill("solid", fgColor="059669")
-
-    ws["A1"] = f"{data.get('company_name', ticker)} — DCF Export"
-    ws["A1"].font = Font(bold=True, size=14, color="FFFFFF")
-    ws["A1"].fill = header_fill
-    ws.merge_cells("A1:F1")
-
-    row = 3
-    ws.cell(row, 1, "Scenario").font = header_font
-    ws.cell(row, 2, "Implied Price").font = header_font
-    ws.cell(row, 3, "Upside %").font = header_font
-    for col in range(1, 4):
-        ws.cell(row, col).fill = accent_fill
-        ws.cell(row, col).font = Font(color="FFFFFF", bold=True)
-
-    scenarios = data.get("scenarios", {})
-    for scenario in ("bear", "base", "bull"):
-        s = scenarios.get(scenario, {})
-        row += 1
-        ws.cell(row, 1, scenario.title())
-        ws.cell(row, 2, s.get("implied_price"))
-        ws.cell(row, 3, s.get("upside_pct"))
-
-    row += 2
-    ws.cell(row, 1, "WACC").font = Font(bold=True)
-    wacc = data.get("wacc", {})
-    for key, value in wacc.items():
-        row += 1
-        ws.cell(row, 1, key)
-        ws.cell(row, 2, value)
-
-    proj = data.get("projections", {}).get("base", {})
-    if proj:
-        row += 2
-        ws.cell(row, 1, "Base projections").font = Font(bold=True)
-        row += 1
-        years = proj.get("years", [])
-        for i, year in enumerate(years, start=2):
-            ws.cell(row, i, year)
-        for label, key in [("Revenue", "revenue"), ("EBITDA", "ebitda"), ("FCF", "fcf")]:
-            row += 1
-            ws.cell(row, 1, label)
-            values = proj.get(key, [])
-            for i, val in enumerate(values, start=2):
-                ws.cell(row, i, val)
-
-    for col_idx in range(1, (ws.max_column or 1) + 1):
-        letter = get_column_letter(col_idx)
-        max_len = 0
-        for row_idx in range(1, (ws.max_row or 1) + 1):
-            value = ws.cell(row_idx, col_idx).value
-            if value is not None:
-                max_len = max(max_len, len(str(value)))
-        ws.column_dimensions[letter].width = min(max_len + 2, 24)
-
-    buffer = BytesIO()
-    wb.save(buffer)
-    buffer.seek(0)
+    buffer = build_formula_linked_workbook(data, ticker)
     filename = f"{ticker}_valuation.xlsx"
     return StreamingResponse(
         buffer,
