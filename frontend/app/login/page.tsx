@@ -2,7 +2,19 @@
 
 import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
-import { Suspense } from "react";
+import { Suspense, useEffect, useState } from "react";
+
+type Diag = {
+  ok: boolean;
+  issues: string[];
+  checks: {
+    GOOGLE_CLIENT_ID: boolean;
+    GOOGLE_CLIENT_SECRET: boolean;
+    NEXTAUTH_SECRET: boolean;
+    NEXTAUTH_URL: string | null;
+    expectedGoogleRedirectUri: string;
+  };
+};
 
 const ERROR_MESSAGES: Record<string, string> = {
   OAuthSignin:
@@ -23,6 +35,14 @@ function LoginContent() {
   const errorMessage = errorCode
     ? ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES.Default
     : null;
+  const [diag, setDiag] = useState<Diag | null>(null);
+
+  useEffect(() => {
+    fetch("/api/auth/diag")
+      .then((r) => r.json())
+      .then(setDiag)
+      .catch(() => null);
+  }, []);
 
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-4">
@@ -36,6 +56,23 @@ function LoginContent() {
           Use your Google account. Only signed-in users can run valuations and export
           models.
         </p>
+
+        {diag && !diag.ok && (
+          <div className="mb-6 rounded-lg border border-amber-500/40 bg-amber-950/40 px-4 py-3 text-left text-sm text-amber-100">
+            <p className="font-medium">Server configuration issue</p>
+            <ul className="mt-2 list-disc space-y-1 pl-4 text-amber-200/90">
+              {diag.issues.map((issue) => (
+                <li key={issue}>{issue}</li>
+              ))}
+            </ul>
+            {diag.checks.NEXTAUTH_URL && (
+              <p className="mt-2 text-xs text-amber-300/80">
+                Server NEXTAUTH_URL:{" "}
+                <code className="break-all">{diag.checks.NEXTAUTH_URL}</code>
+              </p>
+            )}
+          </div>
+        )}
 
         {errorMessage && (
           <div className="mb-6 rounded-lg border border-red-500/40 bg-red-950/40 px-4 py-3 text-left text-sm text-red-200">
