@@ -1,9 +1,12 @@
 import type { ValuationResult } from "./types";
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
+/** Browser calls same-origin Next.js API routes (auth-protected proxies). */
 export function getApiBase(): string {
-  return API_URL.replace(/\/$/, "");
+  if (typeof window !== "undefined") return "";
+  return (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(
+    /\/$/,
+    ""
+  );
 }
 
 export async function fetchValuation(

@@ -9,6 +9,7 @@ import { FootballFieldChart } from "@/components/FootballFieldChart";
 import { LoadingState } from "@/components/LoadingState";
 import { ProjectionsTable } from "@/components/ProjectionsTable";
 import { ScenarioCards } from "@/components/ScenarioCards";
+import { UserMenu } from "@/components/UserMenu";
 import { WaccPanel } from "@/components/WaccPanel";
 import { fetchValuation } from "@/lib/api";
 import { formatBn, formatUsd } from "@/lib/format";
@@ -157,6 +158,7 @@ function PageHeader({
         </Link>
         <span className="font-mono text-lg font-semibold text-white">{ticker}</span>
         <div className="flex items-center gap-2">
+          <UserMenu />
           {data && <ExportButton ticker={ticker} data={data} />}
           {onRefresh && (
             <button

@@ -29,6 +29,7 @@ FMP_API_KEY = _env("FMP_API_KEY")
 SUPABASE_URL = _env("SUPABASE_URL")
 SUPABASE_ANON_KEY = _env("SUPABASE_ANON_KEY")
 FRONTEND_URL = _env("FRONTEND_URL", "http://localhost:3000")
+INTERNAL_API_KEY = _env("INTERNAL_API_KEY")
 
 ROOT = Path(__file__).resolve().parent.parent
 SKILL_PATH = ROOT / "skills" / "dcf-model" / "SKILL.md"
@@ -61,6 +62,18 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
+
+
+@app.middleware("http")
+async def internal_api_key_middleware(request: Request, call_next):
+    """When INTERNAL_API_KEY is set, block direct calls to /api/* without the header."""
+    if (
+        INTERNAL_API_KEY
+        and request.url.path.startswith("/api/")
+        and request.headers.get("x-internal-key") != INTERNAL_API_KEY
+    ):
+        return JSONResponse(status_code=403, content={"detail": "Forbidden"})
+    return await call_next(request)
 
 
 @app.exception_handler(HTTPException)

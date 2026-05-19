@@ -1,5 +1,6 @@
 "use client";
 
+import { UserMenu } from "@/components/UserMenu";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -17,6 +18,9 @@ export default function HomePage() {
   return (
     <main className="relative flex min-h-screen flex-col items-center justify-center px-4">
       <MotionBackgroundGlow />
+      <div className="absolute right-4 top-4 z-20">
+        <UserMenu />
+      </div>
       <div className="relative z-10 w-full max-w-xl text-center">
         <p className="mb-3 text-sm font-medium uppercase tracking-widest text-emerald-400/90">
           Claude × FMP
