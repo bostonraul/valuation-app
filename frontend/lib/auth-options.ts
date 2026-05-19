@@ -1,16 +1,34 @@
 import type { NextAuthOptions } from "next-auth";
 import GoogleProvider from "next-auth/providers/google";
 
+function requireEnv(name: string): string {
+  const value = process.env[name]?.trim();
+  if (!value) {
+    console.error(`[auth] Missing required environment variable: ${name}`);
+    return "";
+  }
+  return value;
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     GoogleProvider({
-      clientId: process.env.GOOGLE_CLIENT_ID ?? "",
-      clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+      clientId: requireEnv("GOOGLE_CLIENT_ID"),
+      clientSecret: requireEnv("GOOGLE_CLIENT_SECRET"),
+      authorization: {
+        params: {
+          prompt: "consent",
+          access_type: "offline",
+          response_type: "code",
+        },
+      },
     }),
   ],
-  secret: process.env.NEXTAUTH_SECRET,
+  secret: requireEnv("NEXTAUTH_SECRET"),
+  debug: process.env.NODE_ENV === "development",
   pages: {
     signIn: "/login",
+    error: "/login",
   },
   callbacks: {
     signIn({ profile }) {

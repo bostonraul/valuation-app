@@ -1,8 +1,29 @@
 "use client";
 
+import { useSearchParams } from "next/navigation";
 import { signIn } from "next-auth/react";
+import { Suspense } from "react";
 
-export default function LoginPage() {
+const ERROR_MESSAGES: Record<string, string> = {
+  OAuthSignin:
+    "Google sign-in could not start. Usually NEXTAUTH_URL or Google redirect URIs do not match your site URL.",
+  OAuthCallback:
+    "Google returned an error. Check redirect URI and that your email is allowed (Google test mode).",
+  OAuthCreateAccount: "Could not create your account.",
+  AccessDenied:
+    "Access denied. Your email domain may not be on the allow list (ALLOWED_EMAIL_DOMAINS).",
+  Configuration:
+    "Server misconfiguration: check GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, and NEXTAUTH_SECRET on Vercel.",
+  Default: "Sign-in failed. See checklist below.",
+};
+
+function LoginContent() {
+  const searchParams = useSearchParams();
+  const errorCode = searchParams.get("error");
+  const errorMessage = errorCode
+    ? ERROR_MESSAGES[errorCode] ?? ERROR_MESSAGES.Default
+    : null;
+
   return (
     <main className="flex min-h-screen flex-col items-center justify-center px-4">
       <BackgroundGlow />
@@ -11,20 +32,62 @@ export default function LoginPage() {
           Valuation App
         </p>
         <h1 className="mb-2 text-3xl font-semibold text-white">Sign in to continue</h1>
-        <p className="mb-8 max-w-sm text-zinc-400">
+        <p className="mb-6 max-w-sm text-zinc-400">
           Use your Google account. Only signed-in users can run valuations and export
           models.
         </p>
+
+        {errorMessage && (
+          <div className="mb-6 rounded-lg border border-red-500/40 bg-red-950/40 px-4 py-3 text-left text-sm text-red-200">
+            <p className="font-medium">Sign-in error{errorCode ? `: ${errorCode}` : ""}</p>
+            <p className="mt-1 text-red-300/90">{errorMessage}</p>
+          </div>
+        )}
+
         <button
           type="button"
           onClick={() => signIn("google", { callbackUrl: "/" })}
-          className="flex w-full max-w-sm items-center justify-center gap-3 rounded-lg border border-zinc-600 bg-white px-6 py-3 text-base font-medium text-zinc-900 transition hover:bg-zinc-100"
+          className="mx-auto flex w-full max-w-sm items-center justify-center gap-3 rounded-lg border border-zinc-600 bg-white px-6 py-3 text-base font-medium text-zinc-900 transition hover:bg-zinc-100"
         >
           <GoogleIcon />
           Continue with Google
         </button>
+
+        <details className="mt-8 max-w-sm text-left text-xs text-zinc-500">
+          <summary className="cursor-pointer text-zinc-400">Fix checklist (OAuthSignin)</summary>
+          <ol className="mt-2 list-decimal space-y-1 pl-4">
+            <li>
+              Vercel <code className="text-zinc-400">NEXTAUTH_URL</code> must be exactly{" "}
+              <code className="text-emerald-400/90">https://valueai.startupworth.online</code>{" "}
+              (no trailing slash).
+            </li>
+            <li>
+              Google Console → redirect URI:{" "}
+              <code className="break-all text-emerald-400/90">
+                https://valueai.startupworth.online/api/auth/callback/google
+              </code>
+            </li>
+            <li>Google Console → JavaScript origin: https://valueai.startupworth.online</li>
+            <li>Redeploy Vercel after changing env vars.</li>
+            <li>If app is in Testing mode, add your Gmail under OAuth consent → Test users.</li>
+          </ol>
+        </details>
       </div>
     </main>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <main className="flex min-h-screen items-center justify-center text-zinc-400">
+          Loading…
+        </main>
+      }
+    >
+      <LoginContent />
+    </Suspense>
   );
 }
 
