@@ -135,9 +135,11 @@ export type IndustryPlayer = {
 };
 
 function getIndustryApiBase() {
-  const fromEnv =
-    process.env.NEXT_PUBLIC_API_URL?.replace(/\/$/, "") || "http://localhost:8000";
-  return fromEnv;
+  if (typeof window !== "undefined") return "";
+  return (process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000").replace(
+    /\/$/,
+    ""
+  );
 }
 
 async function parseOrThrow<T>(res: Response): Promise<T> {
