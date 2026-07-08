@@ -14,6 +14,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from supabase import Client, create_client
 
 from excel_model import build_formula_linked_workbook
+from routers.industry import router as industry_router
 
 logger = logging.getLogger("valuation-api")
 
@@ -62,6 +63,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
+app.include_router(industry_router, prefix="/api/industry")
 
 
 @app.middleware("http")

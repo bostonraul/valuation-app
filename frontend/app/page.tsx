@@ -1,6 +1,7 @@
 "use client";
 
 import { UserMenu } from "@/components/UserMenu";
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 
@@ -52,6 +53,27 @@ export default function HomePage() {
         <p className="mt-8 text-xs text-zinc-600">
           Outputs are analyst drafts for review — not investment advice.
         </p>
+        <div className="mt-10 rounded-xl border border-surface-border bg-surface-card/80 p-4 text-left">
+          <p className="text-xs uppercase tracking-widest text-zinc-500">Browse by Industry</p>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {[
+              ["banking", "Banking"],
+              ["pharma", "Pharma"],
+              ["technology", "Technology"],
+              ["automobiles", "Automobiles"],
+              ["energy", "Energy"],
+              ["real-estate", "Real Estate"],
+            ].map(([slug, label]) => (
+              <Link
+                key={slug}
+                href={`/industry/${slug}`}
+                className="rounded-full border border-surface-border px-3 py-1.5 text-xs text-zinc-300 transition hover:border-amber-500/60 hover:text-white"
+              >
+                {label}
+              </Link>
+            ))}
+          </div>
+        </div>
       </div>
     </main>
   );

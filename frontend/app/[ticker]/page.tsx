@@ -13,6 +13,7 @@ import { UserMenu } from "@/components/UserMenu";
 import { WaccPanel } from "@/components/WaccPanel";
 import { fetchValuation } from "@/lib/api";
 import { formatBn, formatUsd } from "@/lib/format";
+import { inferIndustrySlugFromTicker } from "@/lib/industry-map";
 import type { ValuationResult } from "@/lib/types";
 
 export default function TickerPage() {
@@ -86,6 +87,7 @@ export default function TickerPage() {
   }
 
   const baseScenario = data.scenarios?.base;
+  const industrySlug = inferIndustrySlugFromTicker(ticker);
 
   return (
     <main className="min-h-screen bg-surface pb-16">
@@ -136,6 +138,22 @@ export default function TickerPage() {
           <ProjectionsTable base={data.projections?.base} />
         </div>
         <CompsTable comps={data.comps} />
+        {industrySlug && (
+          <section className="rounded-xl border border-surface-border bg-surface-card p-5">
+            <p className="text-xs uppercase tracking-widest text-zinc-500">Industry Research</p>
+            <div className="mt-3 flex items-center justify-between gap-3">
+              <p className="text-sm text-zinc-300">
+                Explore sector KPIs, players, regulations and M&A context.
+              </p>
+              <Link
+                href={`/industry/${industrySlug}`}
+                className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-sm text-amber-300 transition hover:bg-amber-500/20"
+              >
+                Open Industry Page
+              </Link>
+            </div>
+          </section>
+        )}
       </DashboardContent>
     </main>
   );
