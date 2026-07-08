@@ -284,6 +284,33 @@ def _parse_json_text(text: str) -> dict[str, Any]:
     return json.loads(clean[start : end + 1])
 
 
+def _extract_text_blocks(response: Any) -> str:
+    return "".join(block.text for block in response.content if block.type == "text")
+
+
+def _repair_json_candidates(raw: str) -> list[str]:
+    candidates: list[str] = []
+    clean = raw.strip()
+    if clean.startswith("```"):
+        lines = clean.splitlines()
+        clean = "\n".join(lines[1:-1] if lines and lines[-1].strip() == "```" else lines[1:])
+    candidates.append(clean)
+    candidates.append(clean.replace("\t", "  "))
+    return [c for c in candidates if c]
+
+
+def _safe_json_loads(raw: str) -> dict[str, Any]:
+    last_error: Exception | None = None
+    for candidate in _repair_json_candidates(raw):
+        try:
+            return _parse_json_text(candidate)
+        except Exception as exc:  # pragma: no cover - best effort parser
+            last_error = exc
+    if last_error:
+        raise last_error
+    raise ValueError("Unable to parse JSON output")
+
+
 async def _claude_json(user_prompt: str, context_suffix: str = "") -> dict[str, Any]:
     if not anthropic_client:
         raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY is not configured")
@@ -292,10 +319,34 @@ async def _claude_json(user_prompt: str, context_suffix: str = "") -> dict[str, 
         model=MODEL_NAME,
         max_tokens=5000,
         system=system_prompt,
-        messages=[{"role": "user", "content": user_prompt}],
+        messages=[
+            {
+                "role": "user",
+                "content": user_prompt
+                + "\n\nReturn JSON only. No markdown, no commentary, no trailing commas.",
+            }
+        ],
     )
-    text = "".join(block.text for block in response.content if block.type == "text")
-    return _parse_json_text(text)
+    raw = _extract_text_blocks(response)
+    try:
+        return _safe_json_loads(raw)
+    except Exception:
+        repair_response = anthropic_client.messages.create(
+            model=MODEL_NAME,
+            max_tokens=5000,
+            system="You convert malformed JSON-like text into strict valid JSON. Return JSON only.",
+            messages=[
+                {
+                    "role": "user",
+                    "content": (
+                        "Convert this into strict valid JSON with the same keys and values, "
+                        "fixing commas/quotes/escaping only:\n\n" + raw
+                    ),
+                }
+            ],
+        )
+        repaired_raw = _extract_text_blocks(repair_response)
+        return _safe_json_loads(repaired_raw)
 
 
 def _fallback_player_from_yf(ticker: str) -> dict[str, Any]:
