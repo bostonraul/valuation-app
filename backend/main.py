@@ -319,7 +319,7 @@ async def run_valuation_agent(ticker: str) -> dict[str, Any]:
 
     for _ in range(24):
         response = anthropic_client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model=os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6").strip() or "claude-sonnet-4-6",
             max_tokens=16000,
             system=SYSTEM_PROMPT or "You are a valuation analyst.",
             tools=TOOLS,

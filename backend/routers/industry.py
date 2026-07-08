@@ -25,8 +25,8 @@ logger = logging.getLogger("industry-api")
 router = APIRouter()
 
 FMP_BASE = "https://financialmodelingprep.com/api/v3"
-# Match valuation agent model (stable). Override with CLAUDE_MODEL if needed.
-MODEL_NAME = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-20250514").strip() or "claude-sonnet-4-20250514"
+# Anthropic API id for Claude Sonnet 4.6. Override with CLAUDE_MODEL if needed.
+MODEL_NAME = os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6").strip() or "claude-sonnet-4-6"
 ROOT = Path(__file__).resolve().parents[2]
 SKILL_PATH = ROOT / "agents" / "04-model-builder" / "SKILL.md"
 SKILL_FALLBACK_PATH = ROOT / "skills" / "dcf-model" / "SKILL.md"

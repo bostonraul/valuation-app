@@ -9,7 +9,7 @@ services:
       - key: PYTHON_VERSION
         value: "3.12.8"
       - key: CLAUDE_MODEL
-        value: "claude-sonnet-4-20250514"
+        value: "claude-sonnet-4-6"
       - key: ANTHROPIC_API_KEY
         sync: false
       - key: FMP_API_KEY
