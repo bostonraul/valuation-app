@@ -145,7 +145,20 @@ function getIndustryApiBase() {
 async function parseOrThrow<T>(res: Response): Promise<T> {
   if (!res.ok) {
     const text = await res.text();
-    throw new Error(text || `Industry API failed (${res.status})`);
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed?.detail) throw new Error(String(parsed.detail));
+    } catch (err) {
+      if (err instanceof Error && err.message && !err.message.includes("{")) {
+        throw err;
+      }
+    }
+    if (text.trim().startsWith("<") || text.includes("Bad Gateway")) {
+      throw new Error(
+        "Industry backend timed out while Claude was generating. Refresh in ~30s — cache will serve next time."
+      );
+    }
+    throw new Error(text.slice(0, 280) || `Industry API failed (${res.status})`);
   }
   return res.json();
 }

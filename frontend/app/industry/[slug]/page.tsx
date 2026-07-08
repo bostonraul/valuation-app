@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useParams } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   fetchIndustryNews,
   fetchIndustryPlayers,
@@ -11,7 +11,6 @@ import {
   type IndustryPlayer,
   type IndustryProfile,
 } from "@/lib/industry";
-import { useEffect } from "react";
 
 type TabKey =
   | "overview"
@@ -60,38 +59,105 @@ function fmtPct(v: number | undefined) {
   return `${v.toFixed(1)}%`;
 }
 
-function useIndustryData(slug: string) {
+function useIndustryData(slug: string, tab: TabKey) {
   const [profile, setProfile] = useState<IndustryProfile | null>(null);
   const [players, setPlayers] = useState<IndustryPlayer[]>([]);
   const [news, setNews] = useState<IndustryNewsItem[]>([]);
   const [loading, setLoading] = useState(true);
+  const [playersLoading, setPlayersLoading] = useState(false);
+  const [newsLoading, setNewsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [secondaryError, setSecondaryError] = useState<string | null>(null);
+  const playersFetched = useRef(false);
+  const newsFetched = useRef(false);
 
   useEffect(() => {
     if (!slug) return;
     let mounted = true;
+    playersFetched.current = false;
+    newsFetched.current = false;
     setLoading(true);
     setError(null);
-    Promise.all([fetchIndustryProfile(slug), fetchIndustryPlayers(slug), fetchIndustryNews(slug)])
-      .then(([profileData, playerData, newsData]) => {
+    setSecondaryError(null);
+    setProfile(null);
+    setPlayers([]);
+    setNews([]);
+
+    fetchIndustryProfile(slug)
+      .then((profileData) => {
         if (!mounted) return;
         setProfile(profileData);
-        setPlayers(playerData.players ?? []);
-        setNews(newsData.items ?? []);
       })
       .catch((e) => {
         if (!mounted) return;
-        setError(e instanceof Error ? e.message : "Failed to load industry data");
+        setError(e instanceof Error ? e.message : "Failed to load industry profile");
       })
       .finally(() => {
         if (mounted) setLoading(false);
       });
+
     return () => {
       mounted = false;
     };
   }, [slug]);
 
-  return { profile, players, news, loading, error };
+  useEffect(() => {
+    if (!slug || !profile) return;
+    let mounted = true;
+
+    if (tab === "players" && !playersFetched.current) {
+      playersFetched.current = true;
+      setPlayersLoading(true);
+      setSecondaryError(null);
+      fetchIndustryPlayers(slug)
+        .then((playerData) => {
+          if (!mounted) return;
+          setPlayers(playerData.players ?? []);
+        })
+        .catch((e) => {
+          if (!mounted) return;
+          playersFetched.current = false;
+          setSecondaryError(e instanceof Error ? e.message : "Failed to load players");
+        })
+        .finally(() => {
+          if (mounted) setPlayersLoading(false);
+        });
+    }
+
+    if (tab === "news" && !newsFetched.current) {
+      newsFetched.current = true;
+      setNewsLoading(true);
+      setSecondaryError(null);
+      fetchIndustryNews(slug)
+        .then((newsData) => {
+          if (!mounted) return;
+          setNews(newsData.items ?? []);
+        })
+        .catch((e) => {
+          if (!mounted) return;
+          newsFetched.current = false;
+          setSecondaryError(e instanceof Error ? e.message : "Failed to load news");
+        })
+        .finally(() => {
+          if (mounted) setNewsLoading(false);
+        });
+    }
+
+    return () => {
+      mounted = false;
+    };
+  }, [slug, profile, tab]);
+
+  return {
+    profile,
+    players,
+    news,
+    loading,
+    playersLoading,
+    newsLoading,
+    error,
+    secondaryError,
+  };
 }
 
 export default function IndustrySlugPage() {
@@ -104,7 +170,16 @@ export default function IndustrySlugPage() {
   const [sortBy, setSortBy] = useState<keyof IndustryPlayer>("market_cap_inr_cr");
   const [sortAsc, setSortAsc] = useState(false);
   const [activeSub, setActiveSub] = useState<string | null>(null);
-  const { profile, players, news, loading, error } = useIndustryData(slug);
+  const {
+    profile,
+    players,
+    news,
+    loading,
+    playersLoading,
+    newsLoading,
+    error,
+    secondaryError,
+  } = useIndustryData(slug, tab);
 
   const sortedPlayers = useMemo(() => {
     const copy = [...players];
@@ -199,6 +274,11 @@ export default function IndustrySlugPage() {
         </div>
 
         <section className="mt-4 rounded-2xl border border-[#2a2c48] bg-[#1e2038] p-5">
+          {secondaryError && (
+            <p className="mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-sm text-amber-200">
+              {secondaryError}
+            </p>
+          )}
           {tab === "overview" && (
             <div className="space-y-4 text-sm">
               <p className="whitespace-pre-line text-[#c7c6d6]">{profile.overview.description}</p>
@@ -249,6 +329,9 @@ export default function IndustrySlugPage() {
 
           {tab === "players" && (
             <div className="overflow-x-auto">
+              {playersLoading && (
+                <p className="mb-3 text-sm text-[#8a8ca0]">Loading listed players…</p>
+              )}
               <table className="min-w-full text-left text-sm">
                 <thead>
                   <tr className="border-b border-[#2a2c48] text-[#8a8ca0]">
@@ -341,6 +424,11 @@ export default function IndustrySlugPage() {
 
           {tab === "news" && (
             <div className="space-y-4">
+              {newsLoading && (
+                <p className="text-sm text-[#8a8ca0]">
+                  Enriching sector news with Claude — first load can take ~30–60s, then it caches.
+                </p>
+              )}
               <div className="flex flex-wrap gap-2">
                 {NEWS_FILTERS.map((filter) => (
                   <button
