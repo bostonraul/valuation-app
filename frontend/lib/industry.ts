@@ -187,11 +187,13 @@ export async function fetchIndustryPlayers(
 }
 
 export async function fetchIndustryNews(
-  slug: string
+  slug: string,
+  refresh = false
 ): Promise<{ slug: string; items: IndustryNewsItem[]; source: string }> {
-  const res = await fetch(`${getIndustryApiBase()}/api/industry/${slug}/news`, {
-    cache: "no-store",
-  });
+  const res = await fetch(
+    `${getIndustryApiBase()}/api/industry/${slug}/news${refresh ? "?refresh=true" : ""}`,
+    { cache: "no-store" }
+  );
   return parseOrThrow<{ slug: string; items: IndustryNewsItem[]; source: string }>(res);
 }
 

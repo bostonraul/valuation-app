@@ -201,6 +201,14 @@ export default function IndustrySlugPage() {
     [news, newsFilter]
   );
 
+  const newsCounts = useMemo(() => {
+    const counts: Record<string, number> = { All: news.length };
+    for (const filter of NEWS_FILTERS.slice(1)) {
+      counts[filter] = news.filter((n) => n.category === filter).length;
+    }
+    return counts;
+  }, [news]);
+
   const filteredJargon = useMemo(() => {
     if (!profile?.jargon) return [];
     const q = jargonQuery.trim().toLowerCase();
@@ -452,9 +460,41 @@ export default function IndustrySlugPage() {
                     }`}
                   >
                     {filter}
+                    {news.length > 0 && (
+                      <span className="ml-1 opacity-70">({newsCounts[filter] ?? 0})</span>
+                    )}
                   </button>
                 ))}
               </div>
+              {!newsLoading && news.length === 0 && (
+                <p className="rounded-lg border border-[#2a2c48] bg-[#18192a] px-4 py-6 text-center text-sm text-[#8a8ca0]">
+                  No sector news returned yet. FMP has sparse coverage for Indian NSE tickers —
+                  redeploy backend for Yahoo/Claude digest fallback, or click Refresh below.
+                  <button
+                    type="button"
+                    className="mt-3 block w-full text-[#e07d2a] hover:underline"
+                    onClick={() => {
+                      newsFetched.current = false;
+                      setNewsLoading(true);
+                      fetchIndustryNews(slug, true)
+                        .then((d) => setNews(d.items ?? []))
+                        .catch((e) =>
+                          setSecondaryError(e instanceof Error ? e.message : "Refresh failed")
+                        )
+                        .finally(() => setNewsLoading(false));
+                    }}
+                  >
+                    Refresh news feed
+                  </button>
+                </p>
+              )}
+              {!newsLoading && news.length > 0 && filteredNews.length === 0 && (
+                <p className="rounded-lg border border-[#2a2c48] bg-[#18192a] px-4 py-4 text-sm text-[#8a8ca0]">
+                  No items tagged <strong className="text-[#e0dedd]">{newsFilter}</strong> in this
+                  feed ({news.length} total). Try <strong className="text-[#e0dedd]">All</strong>{" "}
+                  — most Indian headlines are tagged Results or Sector, not M&A.
+                </p>
+              )}
               <div className="space-y-3">
                 {filteredNews.map((item, index) => {
                   const key = `${item.headline}-${index}`;
