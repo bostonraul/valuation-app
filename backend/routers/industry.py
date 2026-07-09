@@ -10,10 +10,10 @@ from typing import Any
 import httpx
 from anthropic import Anthropic
 from fastapi import APIRouter, HTTPException, Query
-from supabase import Client, create_client
 
 from data.industry_taxonomy import TAXONOMY
 from data.industry_tickers import INDUSTRY_TICKERS
+from supabase_client import init_supabase
 
 try:
     import yfinance as yf
@@ -181,21 +181,8 @@ def _read_system_prompt() -> str:
     return "\n\n".join(filter(None, [INDUSTRY_ANALYST_PROMPT, skill_text]))
 
 
-def _init_supabase() -> Client | None:
-    supabase_url = _env("SUPABASE_URL")
-    supabase_anon_key = _env("SUPABASE_ANON_KEY")
-    placeholders = {"", "your-anon-key", "your-project.supabase.co"}
-    if supabase_url in placeholders or supabase_anon_key in placeholders:
-        return None
-    if not supabase_url.startswith("https://") or "supabase.co" not in supabase_url:
-        return None
-    if len(supabase_anon_key) < 20:
-        return None
-    try:
-        return create_client(supabase_url, supabase_anon_key)
-    except Exception as exc:
-        logger.warning("Supabase init failed for industry module: %s", exc)
-        return None
+def _init_supabase():
+    return init_supabase()
 
 
 anthropic_client = Anthropic(api_key=_env("ANTHROPIC_API_KEY")) if _env("ANTHROPIC_API_KEY") else None

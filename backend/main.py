@@ -11,10 +11,11 @@ from dotenv import load_dotenv
 from fastapi import Body, FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
-from supabase import Client, create_client
+from supabase import Client
 
 from excel_model import build_formula_linked_workbook
 from routers.industry import router as industry_router
+from supabase_client import init_supabase
 
 logger = logging.getLogger("valuation-api")
 
@@ -91,21 +92,7 @@ async def unhandled_exception_handler(request: Request, exc: Exception) -> JSONR
 
 def _init_supabase() -> Client | None:
     """Connect to Supabase if credentials are valid; never crash app startup."""
-    placeholders = {"", "your-anon-key", "your-project.supabase.co"}
-    if SUPABASE_URL in placeholders or SUPABASE_ANON_KEY in placeholders:
-        logger.warning("Supabase not configured — valuations will not be cached")
-        return None
-    if not SUPABASE_URL.startswith("https://") or "supabase.co" not in SUPABASE_URL:
-        logger.warning("SUPABASE_URL looks invalid — skipping Supabase")
-        return None
-    if len(SUPABASE_ANON_KEY) < 20:
-        logger.warning("SUPABASE_ANON_KEY looks invalid — skipping Supabase")
-        return None
-    try:
-        return create_client(SUPABASE_URL, SUPABASE_ANON_KEY)
-    except Exception as exc:
-        logger.warning("Supabase client failed: %s — continuing without cache", exc)
-        return None
+    return init_supabase()
 
 
 supabase: Client | None = _init_supabase()
