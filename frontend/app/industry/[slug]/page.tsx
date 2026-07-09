@@ -213,7 +213,12 @@ export default function IndustrySlugPage() {
   }, [profile?.jargon, jargonQuery]);
 
   if (loading) {
-    return <main className="min-h-screen bg-[#18192a] p-8 text-[#8a8ca0]">Loading industry...</main>;
+    return (
+      <main className="min-h-screen bg-[#18192a] p-8 text-[#8a8ca0]">
+        <p>Generating industry profile with Claude…</p>
+        <p className="mt-2 text-sm">First load can take 30–90 seconds. Subsequent visits use cache.</p>
+      </main>
+    );
   }
   if (error || !profile) {
     return <main className="min-h-screen bg-[#18192a] p-8 text-red-300">{error ?? "No data"}</main>;
@@ -223,6 +228,11 @@ export default function IndustrySlugPage() {
     <main className="min-h-screen bg-[#18192a] px-4 py-6 text-[#e0dedd] sm:px-6 lg:px-8">
       <div className="mx-auto max-w-7xl">
         <header className="rounded-2xl border border-[#2a2c48] bg-[#1e2038] p-5">
+          {(profile as IndustryProfile & { warning?: string; source?: string }).warning && (
+            <p className="mb-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+              Partial data — Claude generation had issues. Refresh after deploy/cache warms.
+            </p>
+          )}
           <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <p className="text-xs uppercase tracking-[0.18em] text-[#8a8ca0]">India · Industry</p>

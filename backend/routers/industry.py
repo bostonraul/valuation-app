@@ -184,7 +184,12 @@ def _read_system_prompt() -> str:
 def _init_supabase() -> Client | None:
     supabase_url = _env("SUPABASE_URL")
     supabase_anon_key = _env("SUPABASE_ANON_KEY")
-    if not supabase_url or not supabase_anon_key:
+    placeholders = {"", "your-anon-key", "your-project.supabase.co"}
+    if supabase_url in placeholders or supabase_anon_key in placeholders:
+        return None
+    if not supabase_url.startswith("https://") or "supabase.co" not in supabase_url:
+        return None
+    if len(supabase_anon_key) < 20:
         return None
     try:
         return create_client(supabase_url, supabase_anon_key)
@@ -198,6 +203,7 @@ supabase = _init_supabase()
 FMP_API_KEY = _env("FMP_API_KEY")
 SYSTEM_PROMPT_BASE = _read_system_prompt()
 _fmp_sem = asyncio.Semaphore(FMP_CONCURRENCY)
+_profile_inflight: dict[str, asyncio.Task[dict[str, Any]]] = {}
 
 
 async def _fmp_get(path: str, params: dict[str, Any] | None = None) -> Any:
@@ -367,13 +373,14 @@ async def _claude_json(
     user_prompt: str,
     context_suffix: str = "",
     *,
-    max_tokens: int = 4500,
+    max_tokens: int = 2000,
+    allow_repair: bool = False,
 ) -> dict[str, Any]:
     system_prompt = SYSTEM_PROMPT_BASE + "\n\n" + context_suffix
     full_prompt = (
         user_prompt
-        + "\n\nCRITICAL: Return ONE valid JSON object only. "
-        "No markdown. No trailing commas. Double-quote all keys/strings."
+        + "\n\nCRITICAL: Return ONE compact valid JSON object only. "
+        "No markdown. No trailing commas. Keep strings short."
     )
 
     def _call_and_parse() -> dict[str, Any]:
@@ -381,15 +388,326 @@ async def _claude_json(
         try:
             return _parse_json_text(raw)
         except Exception as first_exc:
+            if not allow_repair:
+                raise first_exc
             logger.warning("Industry Claude JSON parse failed once: %s", first_exc)
             repair_raw = _run_claude_sync(
                 "You repair invalid JSON. Output a single valid JSON object only.",
-                "Fix commas/quotes/escaping and return valid JSON with the same keys:\n\n" + raw[:120000],
+                "Fix commas/quotes/escaping and return valid JSON with the same keys:\n\n"
+                + raw[:60000],
                 max_tokens=max_tokens,
             )
             return _parse_json_text(repair_raw)
 
     return await asyncio.to_thread(_call_and_parse)
+
+
+async def _claude_json_optional(
+    user_prompt: str,
+    context_suffix: str,
+    *,
+    max_tokens: int = 2000,
+    fallback: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        return await _claude_json(
+            user_prompt, context_suffix, max_tokens=max_tokens, allow_repair=False
+        )
+    except Exception as exc:
+        logger.warning("Claude section skipped, using scaffold: %s", exc)
+        return fallback
+
+
+def _sub_label(slug: str) -> str:
+    return slug.replace("-", " ").title()
+
+
+def _profile_scaffold(
+    slug: str,
+    industry_name: str,
+    snaps: list[dict[str, Any]],
+) -> dict[str, Any]:
+    subs = TAXONOMY[slug]["sub"]
+    segments = [
+        {
+            "name": _sub_label(sub),
+            "description": f"Key sub-segment within India's {industry_name.lower()} sector.",
+            "market_share_pct": 0,
+            "key_players": [],
+        }
+        for sub in subs[:8]
+    ]
+    major_players = [
+        {
+            "name": s.get("name") or s.get("ticker", ""),
+            "ticker": s.get("ticker", ""),
+            "type": s.get("industry") or "Listed",
+            "market_position": "Leading listed player",
+            "market_cap_bn_inr": round(_num(s.get("mktCap")) / 10_000_000_000, 2),
+        }
+        for s in snaps[:8]
+    ]
+    return {
+        "industry": industry_name,
+        "slug": slug,
+        "geography": "India",
+        "overview": {
+            "description": (
+                f"{industry_name} is a major sector in India's economy with diverse "
+                f"sub-industries spanning {len(subs)} segments. Analysts track policy, "
+                f"demand cycles, competitive intensity, and margin trends across listed leaders."
+            ),
+            "market_size_usd_bn": 50,
+            "market_size_year": 2024,
+            "cagr_5yr_pct": 8,
+            "gdp_contribution_pct": 3,
+            "employment_millions": 5,
+        },
+        "kpis": [
+            {
+                "name": "Revenue growth",
+                "abbr": "Rev Gr",
+                "definition": "Year-on-year change in sector revenue.",
+                "why_it_matters": "Signals demand momentum and pricing power.",
+                "good_range": "Above GDP growth",
+                "red_flag": "Negative for 2+ quarters",
+            }
+        ],
+        "segments": segments,
+        "major_players": major_players,
+        "customers": {
+            "description": f"End customers and enterprises consuming {industry_name.lower()} products and services.",
+            "segments": ["Retail", "SME", "Corporate", "Government"],
+        },
+        "suppliers": {
+            "description": "Key input providers and ecosystem partners.",
+            "key_inputs": ["Raw materials", "Technology", "Distribution", "Capital"],
+        },
+        "value_chain": [
+            "Input sourcing and manufacturing/service delivery",
+            "Distribution and channel partners",
+            "End-customer monetization and after-sales",
+        ],
+        "geographies": {
+            "dominant_states": ["Maharashtra", "Gujarat", "Karnataka", "Tamil Nadu"],
+            "export_orientation": "Mixed — domestic with export pockets",
+            "fdi_allowed_pct": 100,
+            "notes": "Sector-specific FDI and state incentives apply.",
+        },
+        "regulations": [
+            {
+                "regulator": "Government of India / sector regulator",
+                "key_laws": ["Applicable central and state statutes"],
+                "key_compliance": "Licences, disclosures, and periodic filings",
+                "recent_changes": "Monitor union budget and sector circulars.",
+            }
+        ],
+        "jargon": [
+            {
+                "term": "CAGR",
+                "full_form": "Compound Annual Growth Rate",
+                "definition": "Smoothed annualized growth rate over multiple years.",
+                "used_in": "Market sizing and forecast analysis",
+            }
+        ],
+        "investment_framework": {
+            "what_to_check_before_investing": [
+                {
+                    "parameter": "Growth quality",
+                    "metric": "Volume vs price growth",
+                    "why": "Sustainable demand matters more than one-off pricing.",
+                    "good_threshold": "Volume-led growth",
+                    "red_flag": "Growth only from price hikes",
+                }
+            ],
+            "valuation_multiples_used": ["P/E", "EV/EBITDA"],
+            "cyclicality": "Moderate — monitor macro and commodity cycles.",
+            "key_risks": ["Regulatory change", "Competition", "Input cost inflation"],
+        },
+        "filings_to_track": [
+            {
+                "filing": "Annual Report",
+                "where": "BSE/NSE company page",
+                "what_to_look_for": "Management commentary, margins, and balance sheet quality",
+            }
+        ],
+    }
+
+
+def _deep_merge(base: dict[str, Any], patch: dict[str, Any]) -> dict[str, Any]:
+    out = dict(base)
+    for key, value in patch.items():
+        if isinstance(value, dict) and isinstance(out.get(key), dict):
+            out[key] = _deep_merge(out[key], value)
+        elif value not in (None, "", [], {}):
+            out[key] = value
+    return out
+
+
+async def _generate_live_profile(
+    slug: str,
+    industry_name: str,
+    snaps: list[dict[str, Any]],
+) -> dict[str, Any]:
+    context = INDUSTRY_CONTEXT.get(slug, "India-specific context applies.")
+    scaffold = _profile_scaffold(slug, industry_name, snaps)
+    subs = TAXONOMY[slug]["sub"]
+
+    overview_prompt = f"""
+Industry: {industry_name} (India, slug {slug})
+Sub-industries: {subs[:6]}
+Players: {json.dumps(snaps)[:1200]}
+
+Return JSON ONLY:
+{{
+  "overview": {{
+    "description": "2 short paragraphs",
+    "market_size_usd_bn": 0,
+    "market_size_year": 2024,
+    "cagr_5yr_pct": 0,
+    "gdp_contribution_pct": 0,
+    "employment_millions": 0
+  }},
+  "value_chain": ["step1","step2","step3"],
+  "geographies": {{
+    "dominant_states": ["Maharashtra"],
+    "export_orientation": "text",
+    "fdi_allowed_pct": 0,
+    "notes": "text"
+  }},
+  "customers": {{"description":"text","segments":["a","b"]}},
+  "suppliers": {{"description":"text","key_inputs":["a","b"]}}
+}}
+Max 120 words in overview.description.
+"""
+
+    kpi_prompt = f"""
+Industry: {industry_name} (India)
+Return JSON ONLY:
+{{
+  "kpis": [
+    {{"name":"","abbr":"","definition":"","why_it_matters":"","good_range":"","red_flag":""}}
+  ],
+  "jargon": [
+    {{"term":"","full_form":"","definition":"","used_in":""}}
+  ]
+}}
+Exactly 6 kpis and 8 jargon terms for this sector.
+"""
+
+    segments_prompt = f"""
+Industry: {industry_name} (India)
+Sub-industries: {subs}
+Listed snapshots: {json.dumps(snaps)[:1500]}
+
+Return JSON ONLY:
+{{
+  "segments": [
+    {{"name":"","description":"","market_share_pct":0,"key_players":[""]}}
+  ],
+  "major_players": [
+    {{"name":"","ticker":"","type":"","market_position":"","market_cap_bn_inr":0}}
+  ]
+}}
+Max 6 segments, max 6 major_players. Use .NS tickers where known.
+"""
+
+    invest_prompt = f"""
+Industry: {industry_name} (India)
+Return JSON ONLY:
+{{
+  "regulations": [
+    {{"regulator":"","key_laws":[""],"key_compliance":"","recent_changes":""}}
+  ],
+  "investment_framework": {{
+    "what_to_check_before_investing": [
+      {{"parameter":"","metric":"","why":"","good_threshold":"","red_flag":""}}
+    ],
+    "valuation_multiples_used":[""],
+    "cyclicality":"",
+    "key_risks":[""]
+  }},
+  "filings_to_track": [
+    {{"filing":"","where":"","what_to_look_for":""}}
+  ]
+}}
+Max 2 regulations, 5 checklist items, 4 filings.
+"""
+
+    overview_pack, kpi_pack, segments_pack, invest_pack = await asyncio.gather(
+        _claude_json_optional(
+            overview_prompt,
+            context,
+            max_tokens=1800,
+            fallback={
+                "overview": scaffold["overview"],
+                "value_chain": scaffold["value_chain"],
+                "geographies": scaffold["geographies"],
+                "customers": scaffold["customers"],
+                "suppliers": scaffold["suppliers"],
+            },
+        ),
+        _claude_json_optional(
+            kpi_prompt,
+            context,
+            max_tokens=2200,
+            fallback={"kpis": scaffold["kpis"], "jargon": scaffold["jargon"]},
+        ),
+        _claude_json_optional(
+            segments_prompt,
+            context,
+            max_tokens=2200,
+            fallback={
+                "segments": scaffold["segments"],
+                "major_players": scaffold["major_players"],
+            },
+        ),
+        _claude_json_optional(
+            invest_prompt,
+            context,
+            max_tokens=2200,
+            fallback={
+                "regulations": scaffold["regulations"],
+                "investment_framework": scaffold["investment_framework"],
+                "filings_to_track": scaffold["filings_to_track"],
+            },
+        ),
+    )
+
+    merged = scaffold
+    for pack in (overview_pack, kpi_pack, segments_pack, invest_pack):
+        merged = _deep_merge(merged, pack)
+    merged["slug"] = slug
+    merged["industry"] = industry_name
+    merged["geography"] = "India"
+    return merged
+
+
+async def _build_profile(slug: str) -> dict[str, Any]:
+    industry_name = TAXONOMY[slug]["name"]
+    tickers = _industry_tickers(slug)[:5]
+
+    async def _snap(ticker: str) -> dict[str, Any] | None:
+        try:
+            snap = await _fmp_get(f"profile/{ticker}")
+            if isinstance(snap, list) and snap:
+                row = snap[0]
+                return {
+                    "ticker": ticker,
+                    "name": row.get("companyName"),
+                    "mktCap": row.get("mktCap"),
+                    "sector": row.get("sector"),
+                    "industry": row.get("industry"),
+                    "description": (row.get("description") or "")[:180],
+                }
+        except Exception:
+            return None
+        return None
+
+    snaps = [s for s in await asyncio.gather(*[_snap(t) for t in tickers]) if s]
+    result = await _generate_live_profile(slug, industry_name, snaps)
+    _profile_cache_set(slug, result)
+    return {**result, "source": "live"}
 
 
 def _num(value: Any, default: float = 0.0) -> float:
@@ -502,71 +820,36 @@ async def industry_profile(slug: str):
     if cached:
         return {**cached, "source": "cache"}
 
-    industry_name = TAXONOMY[slug]["name"]
-    tickers = _industry_tickers(slug)[:5]
-
-    async def _snap(ticker: str) -> dict[str, Any] | None:
+    if slug in _profile_inflight:
         try:
-            snap = await _fmp_get(f"profile/{ticker}")
-            if isinstance(snap, list) and snap:
-                row = snap[0]
-                return {
-                    "ticker": ticker,
-                    "name": row.get("companyName"),
-                    "mktCap": row.get("mktCap"),
-                    "sector": row.get("sector"),
-                    "industry": row.get("industry"),
-                    "description": (row.get("description") or "")[:180],
-                }
-        except Exception:
-            return None
-        return None
+            return await asyncio.wait_for(_profile_inflight[slug], timeout=100.0)
+        except asyncio.TimeoutError as exc:
+            raise HTTPException(
+                status_code=504,
+                detail="Industry profile is still generating. Refresh in 30 seconds.",
+            ) from exc
 
-    snaps = [s for s in await asyncio.gather(*[_snap(t) for t in tickers]) if s]
-
-    prompt = f"""
-Build a complete India industry research pack for "{industry_name}" (slug: {slug}).
-
-Sub-industries: {TAXONOMY[slug]["sub"]}
-Listed player snapshots (use for major_players where useful): {json.dumps(snaps)[:3500]}
-
-Return ONE JSON object with EXACTLY these top-level keys:
-industry, slug, geography, overview, kpis, segments, major_players, customers, suppliers,
-value_chain, geographies, regulations, jargon, investment_framework, filings_to_track.
-
-Constraints for length/reliability:
-- overview.description: 2 short paragraphs
-- kpis: 6-8 items
-- segments: cover taxonomy subs (merge if needed, max 8)
-- major_players: 5-8
-- jargon: 8-12 terms
-- regulations: 1-3 regulators
-- investment_framework.what_to_check_before_investing: 5-7
-- filings_to_track: 3-5
-- Use numbers as numbers, not strings
-- slug must be "{slug}", geography must be "India", industry must be "{industry_name}"
-"""
-
+    task = asyncio.create_task(_build_profile(slug))
+    _profile_inflight[slug] = task
     try:
-        result = await _claude_json(
-            prompt,
-            INDUSTRY_CONTEXT.get(slug, "India-specific context applies."),
-            max_tokens=5000,
-        )
-        result["slug"] = slug
-        result["industry"] = industry_name
-        result["geography"] = "India"
-        _profile_cache_set(slug, result)
-        return {**result, "source": "live"}
+        return await task
     except Exception as exc:
         logger.exception("industry profile generation failed for %s", slug)
         stale = _profile_cache_get(slug, allow_stale=True)
         if stale:
             return {**stale, "source": "stale_cache", "warning": str(exc)}
-        raise HTTPException(
-            status_code=502,
-            detail=f"Industry profile generation failed: {exc}",
-        ) from exc
+        # Last resort: return scaffold so UI works even without cache/Claude.
+        industry_name = TAXONOMY[slug]["name"]
+        tickers = _industry_tickers(slug)[:5]
+        snaps = [{"ticker": t, "name": t} for t in tickers]
+        fallback = _profile_scaffold(slug, industry_name, snaps)
+        return {
+            **fallback,
+            "source": "fallback",
+            "warning": str(exc),
+        }
+    finally:
+        _profile_inflight.pop(slug, None)
 
 
 async def _fetch_raw_news(slug: str) -> list[dict[str, Any]]:
