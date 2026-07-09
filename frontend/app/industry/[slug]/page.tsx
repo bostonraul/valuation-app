@@ -148,6 +148,22 @@ function useIndustryData(slug: string, tab: TabKey) {
     };
   }, [slug, profile, tab]);
 
+  const refreshNews = async (force = false) => {
+    if (!slug) return;
+    newsFetched.current = false;
+    setNewsLoading(true);
+    setSecondaryError(null);
+    try {
+      const newsData = await fetchIndustryNews(slug, force);
+      setNews(newsData.items ?? []);
+      newsFetched.current = true;
+    } catch (e) {
+      setSecondaryError(e instanceof Error ? e.message : "Failed to load news");
+    } finally {
+      setNewsLoading(false);
+    }
+  };
+
   return {
     profile,
     players,
@@ -157,6 +173,7 @@ function useIndustryData(slug: string, tab: TabKey) {
     newsLoading,
     error,
     secondaryError,
+    refreshNews,
   };
 }
 
@@ -179,6 +196,7 @@ export default function IndustrySlugPage() {
     newsLoading,
     error,
     secondaryError,
+    refreshNews,
   } = useIndustryData(slug, tab);
 
   const sortedPlayers = useMemo(() => {
@@ -473,16 +491,7 @@ export default function IndustrySlugPage() {
                   <button
                     type="button"
                     className="mt-3 block w-full text-[#e07d2a] hover:underline"
-                    onClick={() => {
-                      newsFetched.current = false;
-                      setNewsLoading(true);
-                      fetchIndustryNews(slug, true)
-                        .then((d) => setNews(d.items ?? []))
-                        .catch((e) =>
-                          setSecondaryError(e instanceof Error ? e.message : "Refresh failed")
-                        )
-                        .finally(() => setNewsLoading(false));
-                    }}
+                    onClick={() => refreshNews(true)}
                   >
                     Refresh news feed
                   </button>
